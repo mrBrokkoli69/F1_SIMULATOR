@@ -4,6 +4,7 @@
 #include <fstream>
 #include <vector>
 #include <iomanip>
+#include <iostream>
 
 using namespace std;
 
@@ -16,35 +17,36 @@ double normalizeAngle(double angle)
     return angle;
 }
 
-double normalize_steer(double angle)
-{
-    while (angle > M_PI)
-        angle = M_PI;
-    while (angle < -M_PI)
-        angle = -M_PI;
-    return angle;
-}
+
 
 // Конструктор
-F1PhysicsEngine::F1PhysicsEngine()
+F1PhysicsEngine::F1PhysicsEngine(int idx)
 {
     reset();
+    setTire(idx); //0-soft, 1-hard
+}
+
+void F1PhysicsEngine::setTire(int idx){
+    if(idx<0 || idx > params.tires.size()-1){
+        cout<<"Wrong tire index"<<endl;
+        return;
+    }
+    current_state.tire_idx = idx;
+
 }
 
 void F1PhysicsEngine::reset()
 {
-  	  current_state = CarState();
-   	 current_state.current_gear = 1;
-        current_state.current_tire_temperature = 70;
-	
-
+    current_state = CarState();
+    current_state.current_gear = 0;
+    current_state.current_tire_temperature = 100;
 }
 
 // Основной метод обновления
-void F1PhysicsEngine::update(double dt, bool gas_pedal, bool brake_pedal, double steering_input)
+void F1PhysicsEngine::update(double dt, bool gas_pedal, bool brake_pedal, double steering_wheel)
 {
     // 1. Обновление угла руля
-    double target_steering = steering_input * params.max_steering_wheel;
+    double target_steering = steering_wheel * params.max_steering_wheel;
     double steering_diff = target_steering - current_state.steering_wheel;
 
     // Плавное изменение руля
@@ -59,14 +61,14 @@ void F1PhysicsEngine::update(double dt, bool gas_pedal, bool brake_pedal, double
     }
 
     calculateEnginePhysics(gas_pedal, dt);
-    calculate_Side_Forces(current_state.steering_wheel, dt);
-    calculate_Long_Forces(gas_pedal, brake_pedal);
-    IsSkeeding(gas_pedal);
-   // calculate_Long_Forces(gas_pedal, brake_pedal);
+    calculateSideForces();
+    calculateLongForces(gas_pedal, brake_pedal);
+    isSkidding(gas_pedal);
+
     integrateMotion(dt);
     integrateWheelMotion(dt);
-    CalculateTireParams(dt);
-    save_to_table(dt);
+    calculateTireParams(dt);
+    saveToTable(dt);
 }
 
 // Управление передачами
@@ -88,32 +90,40 @@ void F1PhysicsEngine::shiftUp()
     acceleration_rate(current_state.engine_rpm);
 }
 
-void F1PhysicsEngine::gas_up() {
-	current_state.max_torque += params.dtorque;
-	if (current_state.max_torque > params.max_limit_torque) {
-		current_state.max_torque = params.max_limit_torque;
-	}
+void F1PhysicsEngine::gasUp()
+{
+    current_state.max_torque += params.dtorque;
+    if (current_state.max_torque > params.max_limit_torque)
+    {
+        current_state.max_torque = params.max_limit_torque;
+    }
 }
 
-void F1PhysicsEngine::gas_down() {
-	current_state.max_torque -= params.dtorque;
-	if (current_state.max_torque < params.min_limit_torque) {
-		current_state.max_torque = params.min_limit_torque;
-	}
+void F1PhysicsEngine::gasDown()
+{
+    current_state.max_torque -= params.dtorque;
+    if (current_state.max_torque < params.min_limit_torque)
+    {
+        current_state.max_torque = params.min_limit_torque;
+    }
 }
 
-void F1PhysicsEngine::brake_up() {
-	current_state.brake_factor += params.brake_factor_k;
-	if (current_state.brake_factor > params.brake_max) {
-		current_state.brake_factor = params.brake_max;
-	}
+void F1PhysicsEngine::brakeUp()
+{
+    current_state.brake_factor += params.brake_factor_k;
+    if (current_state.brake_factor > params.brake_max)
+    {
+        current_state.brake_factor = params.brake_max;
+    }
 }
 
-void F1PhysicsEngine::brake_down() {
-	current_state.brake_factor -= params.brake_factor_k;
-	if (current_state.brake_factor < params.brake_min) {
-		current_state.brake_factor = params.brake_min;
-	}
+void F1PhysicsEngine::brakeDown()
+{
+    current_state.brake_factor -= params.brake_factor_k;
+    if (current_state.brake_factor < params.brake_min)
+    {
+        current_state.brake_factor = params.brake_min;
+    }
 }
 
 void F1PhysicsEngine::shiftDown()
@@ -142,7 +152,6 @@ void F1PhysicsEngine::shiftDown()
 void F1PhysicsEngine::calculateEnginePhysics(bool gas_pedal, double dt)
 {
     calculateRPM(gas_pedal, dt);
-    // TestMaxRPMForCurrentGear();
     calculateTorque();
     calculateWheelParameters();
 }
@@ -167,62 +176,34 @@ void F1PhysicsEngine::calculateRPM(bool gas_pedal, double dt)
         if (gas_pedal)
         {
             current_state.engine_rpm = new_engine_rpm + mean_wheel_load * pow(params.wheel_radius, 2) / params.rotor_inertia * (-current_state.engine_rpm + new_engine_rpm);
-
             current_state.engine_rpm += dt * current_state.acceleration_rate - dt * current_state.rotor_resist;
 
             if (current_state.engine_rpm < 0)
-            {
                 current_state.engine_rpm = 0;
-            }
         }
         else
         {
             current_state.engine_rpm += mean_wheel_load * pow(params.wheel_radius, 2) / params.rotor_inertia * (-current_state.engine_rpm + new_engine_rpm);
-
             current_state.engine_rpm -= dt * current_state.rotor_resist;
 
             if (current_state.engine_rpm < 0)
-            {
                 current_state.engine_rpm = 0;
-            }
         }
     }
     else
     {
         current_state.engine_rpm -= current_state.rotor_resist * dt;
         if (gas_pedal)
-        {
             current_state.engine_rpm += dt * current_state.acceleration_rate;
-        }
 
         if (current_state.engine_rpm < 0)
-        {
             current_state.engine_rpm = 0;
-        }
     }
 
     if (current_state.engine_rpm > params.max_rpm)
-    {
         current_state.engine_rpm = params.max_rpm;
-    }
 
     acceleration_rate(current_state.engine_rpm);
-}
-
-void F1PhysicsEngine::TestMaxRPMForCurrentGear()
-{
-    if (current_state.current_gear > 0)
-    {
-        double gear_ratio = params.gear_ratios[current_state.current_gear];
-        double gear_factor = gear_ratio * params.final_drive;
-        double max_wheel_rpm = params.max_rpm / gear_factor;
-
-        if (current_state.wheel_rpm > max_wheel_rpm)
-        {
-            current_state.wheel_rpm = max_wheel_rpm;
-            // current_state.engine_rpm = current_state.wheel_rpm * gear_factor;
-        }
-    }
 }
 
 void F1PhysicsEngine::calculateTorque()
@@ -249,12 +230,10 @@ void F1PhysicsEngine::calculateWheelParameters()
         double gear_ratio = params.gear_ratios[current_state.current_gear];
         double gear_factor = gear_ratio * params.final_drive;
 
-        current_state.wheel_based_speed = current_state.wheel_rpm * (2 * M_PI / 60.0) * params.wheel_radius;
         current_state.wheel_torque = current_state.engine_torque * gear_factor;
     }
     else
     {
-        current_state.wheel_based_speed = 0.0;
         current_state.wheel_torque = 0.0;
     }
 }
@@ -262,12 +241,10 @@ void F1PhysicsEngine::calculateWheelParameters()
 // Силы
 void F1PhysicsEngine::calculateTractionForce(bool gas_pedal)
 {
-	if(gas_pedal){
-    		current_state.traction_force = current_state.wheel_torque / params.wheel_radius;
-	}
-	else{
-		current_state.traction_force = 0;
-	}
+    if (gas_pedal)
+        current_state.traction_force = current_state.wheel_torque / params.wheel_radius;
+    else
+        current_state.traction_force = 0;
 }
 
 void F1PhysicsEngine::calculateDragForce()
@@ -287,44 +264,42 @@ void F1PhysicsEngine::applyBrakes(double dt)
 {
     double brake_diff = current_state.brake_factor * params.brake_rate * dt;
     if (current_state.wheel_rpm - brake_diff >= 0)
-    {
         current_state.wheel_rpm -= brake_diff;
-    }
 }
 
 void F1PhysicsEngine::calculateBrakeForce()
 {
     if (current_state.velocity.x <= 0)
-    {
         current_state.brake_force = 0;
-    }
     else
-    {
         current_state.brake_force = -current_state.brake_factor * params.max_brake_force;
-    }
 }
 
-void F1PhysicsEngine::calculate_Long_Forces(bool gas_pedal, bool brake_pedal)
+void F1PhysicsEngine::calculateLongForces(bool gas_pedal, bool brake_pedal)
 {
     calculateDragForce();
     calculateBrakeForce();
     calculateDownForce();
-    if (gas_pedal) {
-    if (current_state.current_gear > 0)
+
+    if (gas_pedal)
     {
-        double gear_ratio = params.gear_ratios[current_state.current_gear];
-        double gear_factor = gear_ratio * params.final_drive;
-        double max_wheel_rpm = params.max_rpm / gear_factor;
-        if (current_state.wheel_rpm >= max_wheel_rpm)
+        if (current_state.current_gear > 0)
         {
-            current_state.traction_force = -current_state.drag_force;
-            current_state.wheel_torque = current_state.traction_force * params.wheel_radius;
+            double gear_ratio = params.gear_ratios[current_state.current_gear];
+            double gear_factor = gear_ratio * params.final_drive;
+            double max_wheel_rpm = params.max_rpm / gear_factor;
+            if (current_state.wheel_rpm >= max_wheel_rpm)
+            {
+                current_state.traction_force = -current_state.drag_force;
+                current_state.wheel_torque = current_state.traction_force * params.wheel_radius;
+            }
         }
     }
-    } else {
-	current_state.traction_force = 0;
+    else
+    {
+        current_state.traction_force = 0;
     }
-    
+
     if (brake_pedal)
     {
         applyBrakes(0.01);
@@ -333,43 +308,37 @@ void F1PhysicsEngine::calculate_Long_Forces(bool gas_pedal, bool brake_pedal)
     current_state.long_force = current_state.traction_force + current_state.drag_force + current_state.brake_force;
 }
 
-
-void F1PhysicsEngine::calculate_Side_Forces(double steering, double dt)
+void F1PhysicsEngine::calculateSideForces()
 {
     if (current_state.speed < 0.1)
     {
         current_state.side_force = 0;
         return;
     }
-    current_state.slip_angle = atan2(current_state.velocity.y, abs(current_state.velocity.x)) - normalizeAngle(current_state.car_angle + current_state.steering_wheel);
 
-    double lateral_force = current_state.slip_angle * params.cornering_stiffness * pow(current_state.speed, 1) * exp(-2 * 0.00005 * (current_state.speed - 180.0) * (current_state.speed - 100.0));
+    current_state.slip_angle = atan2(current_state.velocity.y, abs(current_state.velocity.x)) -
+                               normalizeAngle(current_state.car_angle + current_state.steering_wheel);
 
-    // Ручной clamp
+    double lateral_force = current_state.slip_angle * params.cornering_stiffness * pow(current_state.speed, 1) *
+                           exp(-2 * 0.00005 * (current_state.speed - 180.0) * (current_state.speed - 180.0));
+
     current_state.side_force = lateral_force;
 }
 
-void F1PhysicsEngine::IsSkeeding(bool gas_pedal)
-	
+void F1PhysicsEngine::isSkidding(bool gas_pedal)
 {
     calculateTractionForce(gas_pedal);
-   
+
     double Force = sqrt((current_state.traction_force * current_state.traction_force) +
                         (current_state.side_force * current_state.side_force));
     double max_Force = current_state.current_tire_friction * (params.mass * 9.8 + current_state.down_force);
 
     if (Force >= max_Force)
-    {
-        current_state.is_Skeeding = true;
-
-    }
+        current_state.is_skidding = true;
     else
-    {
-        current_state.is_Skeeding = false;
-        
-    }
+        current_state.is_skidding = false;
 
-    if (current_state.is_Skeeding)
+    if (current_state.is_skidding)
     {
         max_Force = current_state.current_tire_friction * (params.mass * 9.8 + current_state.down_force);
         double scale_factor = max_Force / Force;
@@ -380,7 +349,6 @@ void F1PhysicsEngine::IsSkeeding(bool gas_pedal)
 
 void F1PhysicsEngine::integrateMotion(double dt)
 {
-    // --- продольные/поперечные ускорения (оставлено без изменений) ---
     current_state.acceleration.x = current_state.long_force / params.mass;
     current_state.acceleration.y = current_state.side_force / params.mass;
 
@@ -395,110 +363,190 @@ void F1PhysicsEngine::integrateMotion(double dt)
 
     current_state.speed = sqrt(current_state.velocity.x * current_state.velocity.x);
 
-    // УГЛОВОЕ ДВИЖЕНИЕ - правильная логика
     if (current_state.speed > 0.1)
     {
-        // Момент от боковой силы
         double torque = current_state.side_force * params.moment_arm;
-
-        // Угловое ускорение
         double angular_acceleration = torque / params.inertia;
-
-        // Обновление угловой скорости
         current_state.angular_velocity += angular_acceleration * dt;
-
-        // Демпфирование
         current_state.angular_velocity -= current_state.angular_velocity * params.rotational_damping * dt;
     }
     else
     {
-        // На низких скоростях - сильное демпфирование
         current_state.angular_velocity *= 0.6;
     }
 
-    // Обновление угла автомобиля
     current_state.car_angle += current_state.angular_velocity * dt;
     current_state.car_angle = normalizeAngle(current_state.car_angle);
 }
 
 void F1PhysicsEngine::integrateWheelMotion(double dt)
 {
-    if (current_state.is_Skeeding)
+    if (current_state.is_skidding)
     {
-      //  current_state.wheel_rpm += 60 * (current_state.wheel_torque - current_state.traction_force * params.wheel_radius) / (params.wheel_inertia * 2 * M_PI) * dt;
-	double acc =  (current_state.wheel_torque - current_state.traction_force * params.wheel_radius) / (params.wheel_inertia) * params.wheel_radius;
-        current_state.wheel_speed += acc * dt ;
+        double acc = (current_state.wheel_torque - current_state.traction_force * params.wheel_radius) /
+                     (params.wheel_inertia) * params.wheel_radius;
+        current_state.wheel_speed += acc * dt;
     }
     else
     {
         current_state.wheel_speed = current_state.speed;
     }
+
     current_state.wheel_rpm = current_state.wheel_speed * 60 / (params.wheel_radius * 2 * M_PI);
-
 }
 
-void F1PhysicsEngine::CalculateTireParams(double dt)
+void F1PhysicsEngine::calculateTireParams(double dt)
 {
-	current_state.current_tire_friction = params.tire_friction[0];
-    current_state.slip_ratio = abs(current_state.wheel_speed - current_state.speed) / max(max(current_state.speed, current_state.wheel_speed), 0.1);
-    current_state.current_tire_temperature += dt * (params.A_slip_ratio * current_state.slip_ratio + params.A_slip_angle * current_state.slip_angle - params.K_temp * (current_state.current_tire_temperature - params.temp_outside));
-    current_state.current_tire_wear += dt * (params.B_slip_ratio * current_state.slip_ratio + params.B_slip_angle * current_state.slip_angle + params.K_wear * max(0.0, (current_state.current_tire_temperature - params.temp_optimal)));
-    if (current_state.current_tire_wear > 1.0)
-    {
-        current_state.current_tire_wear = 1.0;
-    }
-    if (current_state.current_tire_wear < 0.0)
-    {
-        current_state.current_tire_wear = 0.0;
-    }
-    current_state.current_tire_friction = params.tire_friction[0] + (params.tire_friction[1] - params.tire_friction[0]) * current_state.current_tire_wear ;
+    const TireParams& tire = params.tires[current_state.tire_idx];
+
+    // текущая модель: mu зависит от wear
+    current_state.current_tire_friction = tire.tire_friction[0];
+
+    current_state.slip_ratio =
+        abs(current_state.wheel_speed - current_state.speed) /
+        max(max(current_state.speed, current_state.wheel_speed), 0.1);
+
+    current_state.current_tire_temperature += dt * (
+        tire.A_slip_ratio * current_state.slip_ratio +
+        tire.A_slip_angle * current_state.slip_angle -
+        tire.K_temp * (current_state.current_tire_temperature - tire.temp_outside)
+    );
+
+    current_state.current_tire_wear += dt * (
+        tire.B_slip_ratio * current_state.slip_ratio +
+        tire.B_slip_angle * current_state.slip_angle +
+        tire.K_wear * max(0.0, (current_state.current_tire_temperature - tire.temp_optimal))
+    );
+
+    if (current_state.current_tire_wear > 1.0) current_state.current_tire_wear = 1.0;
+    if (current_state.current_tire_wear < 0.0) current_state.current_tire_wear = 0.0;
+
+    current_state.current_tire_friction =
+        tire.tire_friction[0] +
+        (tire.tire_friction[1] - tire.tire_friction[0]) * current_state.current_tire_wear;
 }
 
-void F1PhysicsEngine::save_to_table(double dt)
+void F1PhysicsEngine::saveToTable(double dt)
 {
-    ofstream file("F2.csv", ios::app); // ios::app для добавления данных
+    std::ofstream file("F2.csv", std::ios::app);
 
     static bool first_write = true;
     static double total_time = 0.0;
 
     if (first_write)
     {
-        file << "Time;X;Y;Speed;V_x;V_y;a_x;Car_angle;Steering;Angular_Velocity;Slip_Angle;Skeeding;Tire_Friction;Engine_RPM;Wheel_RPM;Current_gear;Wheel_Torque;Traction_F;Brake_F;Drag_F;Down_F;Long_F;Side_F;Acc"
-             << endl;
+        file
+            << "Time;"
+
+            // --- Поступательное движение ---
+            << "pos_x;pos_y;"
+            << "vel_x;vel_y;"
+            << "acc_x;acc_y;"
+            << "world_vel_x;world_vel_y;"
+            << "speed;"
+            << "wheel_speed;"
+            << "wheel_acceleration;"
+            << "linear_slip;"
+
+            // --- Вращательное движение ---
+            << "car_angle;"
+            << "angular_velocity;"
+            << "steering_wheel;"
+            << "slip_angle;"
+
+            // --- Трение / шины ---
+            << "is_skidding;"
+            << "current_tire_friction;"
+            << "current_tire_temperature;"
+            << "slip_ratio;"
+            << "current_tire_wear;"
+
+            // --- Двигатель и трансмиссия ---
+            << "max_rpm;"
+            << "max_torque;"
+            << "acceleration_rate;"
+            << "rotor_resist;"
+            << "last_engine_rpm;"
+            << "engine_rpm;"
+            << "engine_torque;"
+            << "wheel_rpm;"
+            << "last_wheel_rpm;"
+            << "wheel_torque;"
+            << "current_gear;"
+            << "previous_gear;"
+            << "wheel_torque_final;"
+
+            // --- Силы ---
+            << "traction_force;"
+            << "drag_force;"
+            << "brake_force;"
+            << "down_force;"
+            << "long_force;"
+            << "side_force;"
+
+            // --- Тормозная система ---
+            << "brake_factor"
+
+            << std::endl;
+
         first_write = false;
     }
 
-    // Обновляем время (можно передавать как параметр или использовать статическую переменную)
-    total_time += dt; // предполагая вызов каждые 10мс
+    total_time += dt;
 
-    // Записываем все данные
-    file << fixed << setprecision(6)
+    file << std::fixed << std::setprecision(6)
          << total_time << ";"
-         << current_state.position.x << ";"
-         << current_state.position.y << ";"
+
+         // --- Поступательное движение ---
+         << current_state.position.x << ";" << current_state.position.y << ";"
+         << current_state.velocity.x << ";" << current_state.velocity.y << ";"
+         << current_state.acceleration.x << ";" << current_state.acceleration.y << ";"
+         << current_state.world_velocity.x << ";" << current_state.world_velocity.y << ";"
          << current_state.speed << ";"
-         << current_state.world_velocity.x << ";"
-         << current_state.world_velocity.y << ";"
-         << current_state.acceleration.x << ";"
+         << current_state.wheel_speed << ";"
+         << current_state.wheel_acceleration << ";"
+         << current_state.linear_slip << ";"
+
+         // --- Вращательное движение ---
          << current_state.car_angle << ";"
-         << current_state.steering_wheel << ";"
          << current_state.angular_velocity << ";"
+         << current_state.steering_wheel << ";"
          << current_state.slip_angle << ";"
-         << (current_state.is_Skeeding ? "YES" : "NO") << ";"
+
+         // --- Трение / шины ---
+         << (current_state.is_skidding ? 1 : 0) << ";"
          << current_state.current_tire_friction << ";"
+         << current_state.current_tire_temperature << ";"
+         << current_state.slip_ratio << ";"
+         << current_state.current_tire_wear << ";"
+
+         // --- Двигатель и трансмиссия ---
+         << current_state.max_rpm << ";"
+         << current_state.max_torque << ";"
+         << current_state.acceleration_rate << ";"
+         << current_state.rotor_resist << ";"
+         << current_state.last_engine_rpm << ";"
          << current_state.engine_rpm << ";"
+         << current_state.engine_torque << ";"
          << current_state.wheel_rpm << ";"
-         << current_state.current_gear << ";"
+         << current_state.last_wheel_rpm << ";"
          << current_state.wheel_torque << ";"
+         << current_state.current_gear << ";"
+         << current_state.previous_gear << ";"
+         << current_state.wheel_torque_final << ";"
+
+         // --- Силы ---
          << current_state.traction_force << ";"
-         << current_state.brake_force << ";"
          << current_state.drag_force << ";"
+         << current_state.brake_force << ";"
          << current_state.down_force << ";"
          << current_state.long_force << ";"
          << current_state.side_force << ";"
-         << current_state.acceleration_rate
-         << endl;
 
-    // Для немедленной записи на диск
+         // --- Тормозная система ---
+         << current_state.brake_factor
+
+         << std::endl;
+
     file.flush();
 }

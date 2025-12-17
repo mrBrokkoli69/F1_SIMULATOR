@@ -698,7 +698,7 @@ void draw_track(Track &track, F1PhysicsEngine &f1_engine, real scale = 1.0)
 				 state.position.x, state.position.y,
 				 state.world_velocity.x, state.world_velocity.y,
 				 state.long_force, state.side_force,
-				 state.is_Skeeding ? "YES" : "NO",
+				 state.is_skidding ? "YES" : "NO",
 				 TARGET_FPS);
 
 		mvprintw(1, 0,
@@ -735,7 +735,7 @@ void draw_track(Track &track, F1PhysicsEngine &f1_engine, real scale = 1.0)
 		case 'w':
 		case 'W':
 			if (!brake_pressed) {
-				f1_engine.gas_up();
+				f1_engine.gasUp();
 				press_number += 1;
 				if (press_number > 4) press_number = 4;
 				if (press_number > 0) {
@@ -746,8 +746,8 @@ void draw_track(Track &track, F1PhysicsEngine &f1_engine, real scale = 1.0)
 
 		case 's':
 		case 'S':
-			f1_engine.gas_down();
-			f1_engine.brake_down();
+			f1_engine.gasDown();
+			f1_engine.brakeDown();
 			press_number -= 1;
 			brake_number -= 1;
 			if (brake_number < 0) brake_number = 0;
@@ -772,7 +772,7 @@ void draw_track(Track &track, F1PhysicsEngine &f1_engine, real scale = 1.0)
 		case 'x':
 		case 'X':
 			if (!gas_pressed) {
-				f1_engine.brake_up();
+				f1_engine.brakeUp();
 
 				brake_number += 1;
 				if (brake_number > 5) brake_number = 5;
@@ -835,6 +835,11 @@ void draw_track(Track &track, F1PhysicsEngine &f1_engine, real scale = 1.0)
 		physics_thread.join();
 	endwin();
 }
+
+
+
+
+
 int main()
 {
 	remove("F2.csv");
@@ -881,7 +886,7 @@ int main()
 	track.fill_between_curves(ins, out);
 
 	// Создаем физический движок F1
-	F1PhysicsEngine f1_engine;
+	F1PhysicsEngine f1_engine(1);
 
 	// Запускаем симуляцию с управлением
 	draw_track(track, f1_engine, 2);
