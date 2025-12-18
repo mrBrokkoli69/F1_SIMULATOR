@@ -136,7 +136,7 @@ private:
         double brake_max = 1.0;
         double brake_min = 0.0;
         double brake_rate = 1000.0;
-        double cornering_stiffness = 12000.0; // Жесткость в повороте
+        double cornering_stiffness = 3000.0; // Жесткость в повороте
         double steering_speed = 1.5; //скорость изменения угла поворота руля
         double lateral_damping_coef = 10; //демпфирование боковой силы
         double rotational_damping = 5.0; // Демпфирование вращения
@@ -144,7 +144,7 @@ private:
         double wheel_inertia = 0.45;
 
         //Шины
-        std::vector<TireParams> tires ={ TireParams({2.0,0.2},30,200,0.005,25,1.5,1.7,0.25,200),TireParams({1.4,0.8},10,100,0.015,25,0.5,0.7,0.05,250) }; // Улучшенное сцепление(max,min)
+        std::vector<TireParams> tires ={ TireParams({2.5,0.01},40,500,0.005,25,3.5,3.7,1,850),TireParams({1.0,0.3},10,100,0.015,25,0.5,1.7,0.2,550) }; // Улучшенное сцепление(max,min)
         // double A_slip_ratio = 10; //коэффицтента для вычисления трения и темепарутры шин
         // double A_slip_angle = 100.0;
         // double K_temp = 0.0015;

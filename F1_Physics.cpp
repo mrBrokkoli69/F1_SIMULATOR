@@ -23,7 +23,7 @@ double normalizeAngle(double angle)
 F1PhysicsEngine::F1PhysicsEngine(int idx)
 {
     reset();
-    setTire(idx); //0-soft, 1-hard
+    setTire(idx);
 }
 
 void F1PhysicsEngine::setTire(int idx){
@@ -40,6 +40,7 @@ void F1PhysicsEngine::reset()
     current_state = CarState();
     current_state.current_gear = 0;
     current_state.current_tire_temperature = 100;
+    current_state.current_tire_wear = 0.0;
 }
 
 // Основной метод обновления
@@ -319,7 +320,7 @@ void F1PhysicsEngine::calculateSideForces()
     current_state.slip_angle = atan2(current_state.velocity.y, abs(current_state.velocity.x)) -
                                normalizeAngle(current_state.car_angle + current_state.steering_wheel);
 
-    double lateral_force = current_state.slip_angle * params.cornering_stiffness * pow(current_state.speed, 1) *
+    double lateral_force = current_state.slip_angle * params.cornering_stiffness  * pow(current_state.speed, 1) *
                            exp(-2 * 0.00005 * (current_state.speed - 180.0) * (current_state.speed - 180.0));
 
     current_state.side_force = lateral_force;
@@ -408,9 +409,12 @@ void F1PhysicsEngine::calculateTireParams(double dt)
 
     current_state.current_tire_temperature += dt * (
         tire.A_slip_ratio * current_state.slip_ratio +
-        tire.A_slip_angle * current_state.slip_angle -
-        tire.K_temp * (current_state.current_tire_temperature - tire.temp_outside)
+        tire.A_slip_angle * abs(current_state.slip_angle) -
+        tire.K_temp * abs(current_state.current_tire_temperature - tire.temp_outside)
     );
+    if(current_state.current_tire_temperature<0){
+	   current_state.current_tire_temperature = 0;}
+
 
     current_state.current_tire_wear += dt * (
         tire.B_slip_ratio * current_state.slip_ratio +
